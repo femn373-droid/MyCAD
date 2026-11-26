@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyCAD 電気配線図</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header id="toolbar">
+  <div class="brand">MyCAD</div>
+  <div class="group">
+    <button data-act="new" title="新しい図面">新規</button>
+    <button data-act="open" title="開く (Ctrl+O)">開く</button>
+    <button data-act="save" title="保存 (Ctrl+S)">保存</button>
+    <button data-act="saveas" title="名前を付けて保存 (Ctrl+Shift+S)">別名保存</button>
+    <button data-act="print" title="印刷・PDF保存 (Ctrl+P)">印刷 / PDF</button>
+    <input type="file" id="fileInput" accept=".json" hidden>
+  </div>
+  <div class="group">
+    <button data-act="undo" title="元に戻す (Ctrl+Z)">↶</button>
+    <button data-act="redo" title="やり直し (Ctrl+Y)">↷</button>
+  </div>
+  <div class="group">
+    <button data-tool="select" title="選択 (V)">選択 <kbd>V</kbd></button>
+    <button data-tool="line" title="線 (L)">線 <kbd>L</kbd></button>
+    <button data-tool="wire" title="配線 (W)">配線 <kbd>W</kbd></button>
+    <button data-tool="dim" title="寸法 (D)">寸法 <kbd>D</kbd></button>
+    <button data-tool="text" title="文字 (T)">文字 <kbd>T</kbd></button>
+    <button data-tool="paper" title="用紙枠（印刷範囲）を移動 (P)">用紙位置 <kbd>P</kbd></button>
+  </div>
+  <div class="group">
+    <label>線種 <select id="lineStyle"></select></label>
+    <label>配線 <select id="wireType"></select></label>
+  </div>
+  <div class="group">
+    <button id="osnapBtn" class="toggle" title="端点・交点などへのスナップ (F3)">スナップ</button>
+    <button id="gsnapBtn" class="toggle" title="グリッドへのスナップ (F9)">グリッド</button>
+    <button id="orthoBtn" class="toggle" title="水平・垂直に限定 (F8 / Shift押下中)">直交</button>
+    <button data-act="fit" title="用紙全体を表示 (Home)">全体表示</button>
+  </div>
+</header>
+
+<main>
+  <aside id="palette">
+    <h3>電気</h3>
+    <div class="pal" id="palElec"></div>
+    <h3>建物</h3>
+    <div class="pal" id="palArch"></div>
+  </aside>
+
+  <div id="canvasWrap"><canvas id="cv" tabindex="0"></canvas></div>
+
+  <aside id="side">
+    <section>
+      <h3>図面設定</h3>
+      <label class="prop"><span>件名</span><input id="setTitle" type="text" placeholder="〇〇様邸 電気配線図"></label>
+      <label class="prop"><span>縮尺</span>
+        <select id="setScale">
+          <option value="20">1/20</option><option value="30">1/30</option><option value="50">1/50</option>
+          <option value="100">1/100</option><option value="200">1/200</option>
+        </select></label>
+      <label class="prop"><span>用紙</span>
+        <select id="setPaper"><option>A4</option><option>A3</option><option>A2</option></select></label>
+      <label class="prop"><span>向き</span>
+        <select id="setOrient"><option value="1">横</option><option value="0">縦</option></select></label>
+      <label class="prop"><span>グリッド</span>
+        <select id="setGrid">
+          <option value="910">910（尺モジュール）</option><option value="1000">1000（メーター）</option>
+          <option value="455">455</option><option value="500">500</option><option value="300">300</option>
+        </select></label>
+      <label class="prop"><span>日付</span><input id="setDate" type="text"></label>
+      <label class="prop"><span>作成</span><input id="setAuthor" type="text"></label>
+    </section>
+    <section>
+      <h3>レイヤー</h3>
+      <div id="layers"></div>
+    </section>
+    <section>
+      <h3 id="propsTitle">プロパティ</h3>
+      <div id="props"></div>
+    </section>
+  </aside>
+</main>
+
+<footer id="status">
+  <span id="stCoord"></span>
+  <span id="stSnap"></span>
+  <span id="stInput"></span>
+  <span id="stHint"></span>
+</footer>
+<div id="toast"></div>
+
+<script src="js/symbols.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
