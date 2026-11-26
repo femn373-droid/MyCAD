@@ -63,7 +63,6 @@ main { flex: 1; display: flex; min-height: 0; }
 
 .layer { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
 .layer .name { flex: 1; }
-.layer .swatch { width: 10px; height: 10px; border-radius: 2px; }
 .layer button { padding: 1px 6px; font-size: 11px; }
 
 #status {
@@ -79,3 +78,9 @@ main { flex: 1; display: flex; min-height: 0; }
   opacity: 0; transition: opacity .2s; pointer-events: none;
 }
 #toast.show { opacity: 1; }
+
+input.num { width: 56px; }
+.layer input[type=color] { width: 22px; height: 18px; padding: 0; border: 1px solid var(--line); border-radius: 3px; }
+.prop input[type=color] { width: 44px; height: 24px; padding: 1px; }
+.prop input[type=checkbox] { width: auto; justify-self: start; }
+#cv.panning { cursor: grabbing; }

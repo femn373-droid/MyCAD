@@ -23,6 +23,7 @@
   </div>
   <div class="group">
     <button data-tool="select" title="選択 (V)">選択 <kbd>V</kbd></button>
+    <button data-tool="wall" title="壁 (K)">壁 <kbd>K</kbd></button>
     <button data-tool="line" title="線 (L)">線 <kbd>L</kbd></button>
     <button data-tool="wire" title="配線 (W)">配線 <kbd>W</kbd></button>
     <button data-tool="dim" title="寸法 (D)">寸法 <kbd>D</kbd></button>
@@ -30,8 +31,10 @@
     <button data-tool="paper" title="用紙枠（印刷範囲）を移動 (P)">用紙位置 <kbd>P</kbd></button>
   </div>
   <div class="group">
+    <label title="壁芯から、描く方向に向かって左側・右側の厚さ (mm)">壁厚 左<input id="wallL" type="number" step="5" min="0" class="num"> 右<input id="wallR" type="number" step="5" min="0" class="num"></label>
     <label>線種 <select id="lineStyle"></select></label>
     <label>配線 <select id="wireType"></select></label>
+    <label>色 <select id="drawColor"></select></label>
   </div>
   <div class="group">
     <button id="osnapBtn" class="toggle" title="端点・交点などへのスナップ (F3)">スナップ</button>
@@ -69,6 +72,15 @@
           <option value="910">910（尺モジュール）</option><option value="1000">1000（メーター）</option>
           <option value="455">455</option><option value="500">500</option><option value="300">300</option>
         </select></label>
+      <label class="prop"><span>スナップ</span>
+        <select id="setSnapDiv">
+          <option value="1">グリッドの交点</option><option value="2">1/2 グリッド</option>
+          <option value="4">1/4 グリッド</option><option value="8">1/8 グリッド</option>
+        </select></label>
+      <label class="prop"><span>芯線</span>
+        <select id="setCenter"><option value="1">表示する</option><option value="0">表示しない</option></select></label>
+      <label class="prop"><span>印刷色</span>
+        <select id="setPrintColor"><option value="1">カラー</option><option value="0">白黒</option></select></label>
       <label class="prop"><span>日付</span><input id="setDate" type="text"></label>
       <label class="prop"><span>作成</span><input id="setAuthor" type="text"></label>
     </section>

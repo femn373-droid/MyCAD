@@ -27,6 +27,7 @@ window.SYMBOLS = {
              label: '', labelPos: { x: 0, y: 3.4 }, labelSize: 2 },
   meter:   { name: '電力量計', cat: 'elec', unit: 'paper', wall: true, wallOff: 1.9, hit: 3,
              label: '', labelPos: { x: 0, y: 3.8 }, labelSize: 2 },
+  column:  { name: '柱', cat: 'arch', unit: 'world', wall: true, w: 120, column: true },
   door:    { name: '片開き戸', cat: 'arch', unit: 'world', wall: true, w: 780 },
   slide:   { name: '引違い戸', cat: 'arch', unit: 'world', wall: true, w: 1640 },
   window:  { name: '引違い窓', cat: 'arch', unit: 'world', wall: true, w: 1640 },
@@ -46,7 +47,8 @@ window.fillTextSafe = function (c, text, x, y, size, weight) {
 
 /*
  * 記号の形を描く。呼び出し側で translate / rotate / (flip) / (paper なら scale) 済み。
- * g = { fg, bg, Lw(用紙mm→線幅), P(用紙1mmあたりのローカル単位) }
+ * g = { fg, bg, Lw(用紙mm→線幅), P(用紙1mmあたりのローカル単位), pad(壁線を隠す余白) }
+ * 建具・柱の d1 / d2 は壁芯から -y 側 / +y 側（部屋側）の壁厚
  */
 window.drawSymbolShape = function (c, e, g) {
   const fg = g.fg, bg = g.bg, Lw = g.Lw, P = g.P;
@@ -96,34 +98,43 @@ window.drawSymbolShape = function (c, e, g) {
       break;
 
     case 'door': {
-      const w = e.w || 780, m = 0.45 * P;
-      c.fillStyle = bg; c.fillRect(-w / 2, -m, w, m * 2);
-      c.lineWidth = Lw(0.18); c.beginPath(); seg(-w / 2, -m, -w / 2, m); seg(w / 2, -m, w / 2, m); c.stroke();
-      c.lineWidth = Lw(0.3); c.beginPath(); seg(-w / 2, 0, -w / 2, w); c.stroke();
-      c.lineWidth = Lw(0.13); c.beginPath(); c.arc(-w / 2, 0, w, 0, Math.PI / 2); c.stroke();
+      const w = e.w || 780, d1 = e.d1 ?? 0.45 * P, d2 = e.d2 ?? 0.45 * P, pad = g.pad || 0;
+      c.fillStyle = bg; c.fillRect(-w / 2, -d1 - pad, w, d1 + d2 + pad * 2);
+      c.lineWidth = Lw(0.18); c.beginPath(); seg(-w / 2, -d1, -w / 2, d2); seg(w / 2, -d1, w / 2, d2); c.stroke();
+      c.lineWidth = Lw(0.3); c.beginPath(); seg(-w / 2, d2, -w / 2, d2 + w); c.stroke();
+      c.lineWidth = Lw(0.13); c.beginPath(); c.arc(-w / 2, d2, w, 0, Math.PI / 2); c.stroke();
       break;
     }
     case 'slide': {
-      const w = e.w || 1640, m = 0.75 * P;
-      c.fillStyle = bg; c.fillRect(-w / 2, -m, w, m * 2);
-      c.lineWidth = Lw(0.18); c.beginPath(); seg(-w / 2, -m, -w / 2, m); seg(w / 2, -m, w / 2, m); c.stroke();
+      const w = e.w || 1640, d1 = e.d1 ?? 0.75 * P, d2 = e.d2 ?? 0.75 * P, pad = g.pad || 0;
+      const mid = (d2 - d1) / 2, h = Math.max(d1 + d2, 0.6 * P);
+      c.fillStyle = bg; c.fillRect(-w / 2, -d1 - pad, w, d1 + d2 + pad * 2);
+      c.lineWidth = Lw(0.18); c.beginPath(); seg(-w / 2, -d1, -w / 2, d2); seg(w / 2, -d1, w / 2, d2); c.stroke();
       c.lineWidth = Lw(0.35); c.beginPath();
-      seg(-w / 2, -m * 0.35, w * 0.04, -m * 0.35);
-      seg(-w * 0.04, m * 0.35, w / 2, m * 0.35);
+      seg(-w / 2, mid - h * 0.15, w * 0.04, mid - h * 0.15);
+      seg(-w * 0.04, mid + h * 0.15, w / 2, mid + h * 0.15);
       c.stroke();
       break;
     }
     case 'window': {
-      const w = e.w || 1640, m = 0.75 * P;
-      c.fillStyle = bg; c.fillRect(-w / 2, -m, w, m * 2);
+      const w = e.w || 1640, d1 = e.d1 ?? 0.75 * P, d2 = e.d2 ?? 0.75 * P, pad = g.pad || 0;
+      const mid = (d2 - d1) / 2, h = Math.max(d1 + d2, 0.6 * P);
+      c.fillStyle = bg; c.fillRect(-w / 2, -d1 - pad, w, d1 + d2 + pad * 2);
       c.lineWidth = Lw(0.13); c.beginPath();
-      seg(-w / 2, -m, w / 2, -m); seg(-w / 2, m, w / 2, m);
-      seg(-w / 2, -m, -w / 2, m); seg(w / 2, -m, w / 2, m);
+      seg(-w / 2, -d1, w / 2, -d1); seg(-w / 2, d2, w / 2, d2);
+      seg(-w / 2, -d1, -w / 2, d2); seg(w / 2, -d1, w / 2, d2);
       c.stroke();
       c.lineWidth = Lw(0.25); c.beginPath();
-      seg(-w / 2, -m * 0.3, w * 0.04, -m * 0.3);
-      seg(-w * 0.04, m * 0.3, w / 2, m * 0.3);
+      seg(-w / 2, mid - h * 0.12, w * 0.04, mid - h * 0.12);
+      seg(-w * 0.04, mid + h * 0.12, w / 2, mid + h * 0.12);
       c.stroke();
+      break;
+    }
+    case 'column': {
+      const w = e.w || 120, d1 = e.d1 ?? w / 2, d2 = e.d2 ?? w / 2;
+      c.fillStyle = bg; c.fillRect(-w / 2, -d1, w, d1 + d2);
+      c.lineWidth = Lw(0.3); c.beginPath(); c.rect(-w / 2, -d1, w, d1 + d2); c.stroke();
+      c.lineWidth = Lw(0.13); c.beginPath(); seg(-w / 2, -d1, w / 2, d2); seg(w / 2, -d1, -w / 2, d2); c.stroke();
       break;
     }
   }
