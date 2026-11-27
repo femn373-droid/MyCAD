@@ -41,6 +41,7 @@ const HINTS = {
   symLocked: '壁に沿って配置：クリックで配置／カーソルのある側が部屋側／右クリック・Escで壁を選び直す',
   symFree: 'クリックで配置／壁に近づけると吸着（カーソル側が部屋側）／R:回転 F:反転',
   paper: 'ドラッグで用紙枠（印刷範囲）を移動',
+  erase: '消したい図形をクリック → 確認して削除（ロックしたレイヤーは対象外）',
 };
 const PRI = { end: 0, center: 0, int: 1, mid: 2, near: 3, grid: 4 };
 
@@ -91,9 +92,13 @@ function normalize(d) {
   out.meta = Object.assign(newDoc().meta, d.meta || {});
   out.paper = Object.assign(newDoc().paper, d.paper || {});
   const layers = Array.isArray(d.layers) ? d.layers : [];
-  out.layers = DEFAULT_LAYERS.map(L => Object.assign({}, L, layers.find(x => x.id === L.id) || {}));
+  // 保存されたレイヤーの順番（重なり順）を保ち、足りないレイヤーを補う
+  out.layers = layers.filter(x => DEFAULT_LAYERS.some(L => L.id === x.id))
+    .map(x => Object.assign({}, DEFAULT_LAYERS.find(L => L.id === x.id), x));
+  for (const L of DEFAULT_LAYERS) if (!out.layers.some(x => x.id === L.id)) out.layers.push(Object.assign({}, L));
   out.entities = Array.isArray(d.entities) ? d.entities : [];
   out.nextId = Math.max(out.nextId || 1, ...out.entities.map(e => (e.id || 0) + 1), 1);
+  for (const e of out.entities) if (e.id == null) e.id = out.nextId++;   // 番号のない図形に番号を振る
   out.version = 2;
   return out;
 }
@@ -109,7 +114,8 @@ const st = {
   place: { kind: null, rot: 0, rotUser: 0, flip: false, label: '', w: 0,
     lockId: null, hover: null, attached: false, d1: undefined, d2: undefined },
   placePick: true, colFit: true, colSize: 120,
-  lineStyle: 'thin', wireType: 'ceiling', wallL: 60, wallR: 60, color: '',
+  lineStyle: 'thin', wireType: 'ceiling', wallL: 60, wallR: 60, color: '', drawLayer: '', wireR: 4,
+  wallMark: false,
 };
 const undoStack = [], redoStack = [];
 let fileHandle = null;
@@ -146,6 +152,7 @@ function redo() {
 function changed() { scheduleAutosave(); refreshProps(); render(); }
 function addEntity(e) {
   e.id = doc.nextId++;
+  if (st.drawLayer && doc.layers.some(L => L.id === st.drawLayer)) e.layer = st.drawLayer;
   if (st.color && !e.color) e.color = st.color;
   doc.entities.push(e);
   return e;
@@ -218,10 +225,15 @@ function wallSeg(e) {
   const isWall = e.type === 'wall';
   return { id: e.id, e, a, b, len, u, tl: isWall ? (e.tl || 0) : 0, tr: isWall ? (e.tr || 0) : 0 };
 }
+// 壁を優先し、近くに壁がなければ線（旧形式の壁や細線）に取り付ける
 function nearestWall(p, px) {
+  return nearestWallOf(p, px, 'wall') || nearestWallOf(p, px, 'line');
+}
+function nearestWallOf(p, px, type) {
   let best = null, bd = Infinity;
   for (const e of doc.entities) {
-    if ((e.type !== 'wall' && e.type !== 'line') || !isVisible(e)) continue;
+    if (e.type !== type || !isVisible(e)) continue;
+    if (type === 'line' && e.layer !== 'arch') continue;   // 文字レイヤーの引出線などには付けない
     const w = wallSeg(e);
     if (!w) continue;
     const d = distToSeg(p, w.a, w.b).d - Math.max(w.tl, w.tr);
@@ -378,6 +390,7 @@ function buildSym(p) {
   const P = st.place, d = SYM[P.kind];
   const e = { type: 'sym', layer: d.cat === 'arch' ? 'arch' : 'elec', kind: P.kind, x: p.x, y: p.y,
     rot: P.rot, flip: P.flip, label: P.label };
+  if (d.wallMark && st.wallMark) e.wallMark = true;
   if (d.column) {
     if (P.attached && st.colFit && P.d1 + P.d2 > 0) {
       e.fit = true; e.d1 = P.d1; e.d2 = P.d2; e.w = P.d1 + P.d2;
@@ -406,12 +419,16 @@ function colorFor(e, g) {
 }
 
 function drawDoc(c, g) {
-  const order = ['line', 'wire', 'sym', 'dim', 'text'];
+  // レイヤー内の重なり順：壁 → 旧形式の太線 → 配線 → 記号（建具の白抜き）→ 線 → 寸法 → 文字
+  const rank = e => e.type === 'line' ? (e.style === 'wall' ? 0 : 3)
+    : ({ wire: 1, sym: 2, dim: 4, text: 5 }[e.type] ?? 6);
   for (const L of doc.layers) {
     if (!L.visible) continue;
     const ents = doc.entities.filter(e => e.layer === L.id);
     drawWalls(c, ents.filter(e => e.type === 'wall'), g);
-    for (const t of order) for (const e of ents) if (e.type === t) drawEntity(c, e, g, colorFor(e, g));
+    const rest = ents.filter(e => e.type !== 'wall').map((e, i) => [rank(e), i, e]);
+    rest.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    for (const [, , e] of rest) drawEntity(c, e, g, colorFor(e, g));
   }
   drawFrame(c, g);
 }
@@ -468,14 +485,30 @@ function drawEntity(c, e, g, col) {
   }
   c.restore();
 }
+// 中継点の角を丸めた経路（r は実寸）。角の両側の線分に収まるよう半径を自動で小さくする
+function wirePath(c, pts, r) {
+  c.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length - 1; i++) {
+    const a = pts[i - 1], b = pts[i], n = pts[i + 1];
+    const l1 = dist(a, b), l2 = dist(b, n);
+    if (r <= 0 || l1 < 1e-6 || l2 < 1e-6) { c.lineTo(b.x, b.y); continue; }
+    const u1 = { x: (a.x - b.x) / l1, y: (a.y - b.y) / l1 }, u2 = { x: (n.x - b.x) / l2, y: (n.y - b.y) / l2 };
+    const th = Math.acos(Math.max(-1, Math.min(1, u1.x * u2.x + u1.y * u2.y)));   // 角の内角
+    if (th < 1e-3 || Math.PI - th < 1e-3) { c.lineTo(b.x, b.y); continue; }
+    const maxT = Math.min(l1, l2) / 2;
+    const rr = Math.min(r, maxT * Math.tan(th / 2));
+    c.arcTo(b.x, b.y, n.x, n.y, rr);
+  }
+  const z = pts[pts.length - 1];
+  c.lineTo(z.x, z.y);
+}
 function drawWire(c, e, g) {
   const S = g.S;
   if (e.pts.length < 2) return;
   c.lineWidth = g.L(0.3);
   c.setLineDash((WIRE_DASH[e.wtype] || []).map(v => v * S));
   c.beginPath();
-  c.moveTo(e.pts[0].x, e.pts[0].y);
-  for (let i = 1; i < e.pts.length; i++) c.lineTo(e.pts[i].x, e.pts[i].y);
+  wirePath(c, e.pts, (e.r ?? 4) * S);
   c.stroke();
   c.setLineDash([]);
   const n = e.count || 2;
@@ -628,7 +661,7 @@ function drawPreview(c, g) {
       }
       break;
     case 'wire':
-      if (st.pts.length) drawWire(c, { wtype: st.wireType, count: 2, pts: [...st.pts, p] }, g);
+      if (st.pts.length) drawWire(c, { wtype: st.wireType, count: 2, r: st.wireR, pts: [...st.pts, p] }, g);
       break;
     case 'dim':
       if (st.pts.length === 1) {
@@ -696,10 +729,11 @@ function drawSnapMarker() {
 function drawGrips(e) {
   ctx.save();
   ctx.fillStyle = '#fff'; ctx.strokeStyle = HILITE; ctx.lineWidth = 1.5;
-  for (const q of keyPts(e)) {
+  keyPts(e).forEach((q, i) => {
     const p = toScreen(q);
+    ctx.fillStyle = i === st.vsel ? HILITE : '#fff';
     ctx.beginPath(); ctx.rect(p.x - 4, p.y - 4, 8, 8); ctx.fill(); ctx.stroke();
-  }
+  });
   ctx.restore();
 }
 
@@ -722,10 +756,14 @@ function renderNow() {
   drawGrid(ctx);
   drawDoc(ctx, g);
   const e = selEnt();
-  if (e && isVisible(e)) { ctx.save(); ctx.globalAlpha = 0.9; drawEntity(ctx, e, g, HILITE); ctx.restore(); }
+  if (e && isVisible(e)) { ctx.save(); ctx.globalAlpha = 0.9; drawEntity(ctx, e, g, st.tool === 'erase' ? '#d32f2f' : HILITE); ctx.restore(); }
+  if (st.tool === 'erase' && !e && st.mouseIn) {
+    const h = hitTest(st.raw, 8 / view.z);
+    if (h) { ctx.save(); ctx.globalAlpha = 0.6; drawEntity(ctx, h, g, '#d32f2f'); ctx.restore(); }
+  }
   drawPreview(ctx, g);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  if (e && isVisible(e)) drawGrips(e);
+  if (e && isVisible(e) && st.tool !== 'erase') drawGrips(e);
   if (st.mouseIn && !st.pan) drawSnapMarker();
 }
 
@@ -844,6 +882,8 @@ function toolClick(p) {
     case 'wire': {
       const last = st.pts[st.pts.length - 1];
       if (!last || dist(last, p) > 1e-6) st.pts.push({ x: p.x, y: p.y });
+      // 記号の中心で終われば自動で確定（始点以外）
+      if (st.pts.length >= 2 && st.snap && st.snap.type === 'center') { finishWire(); return; }
       break;
     }
     case 'dim':
@@ -882,7 +922,7 @@ function finishWire() {
   const pts = st.pts.filter((p, i, a) => i === 0 || dist(p, a[i - 1]) > 1e-6);
   if (pts.length >= 2) {
     pushUndo();
-    addEntity({ type: 'wire', layer: 'elec', wtype: st.wireType, count: 2, pts });
+    addEntity({ type: 'wire', layer: 'elec', wtype: st.wireType, count: 2, r: st.wireR, pts });
     changed();
   }
   st.pts = [];
@@ -917,6 +957,9 @@ function applyInput() {
 function deleteSel() {
   const e = selEnt();
   if (!e || !isEditable(e)) return;
+  if (e.type === 'wire' && st.vsel != null && e.pts.length > 2 && st.vsel > 0 && st.vsel < e.pts.length - 1) {
+    pushUndo(); e.pts.splice(st.vsel, 1); st.vsel = null; changed(); return;   // 中継点だけ消す
+  }
   pushUndo();
   doc.entities = doc.entities.filter(x => x !== e);
   st.sel = null;
@@ -962,6 +1005,7 @@ cv.addEventListener('mousedown', ev => {
   st.raw = toWorld(s.x, s.y); st.shift = ev.shiftKey; st.ctrl = ev.ctrlKey || ev.metaKey;
   updateCursor();
   if (st.tool === 'select') selectPress(s);
+  else if (st.tool === 'erase') erasePress();
   else if (st.tool === 'paper') {
     st.drag = { type: 'paper', start: { ...st.raw }, orig: { x: doc.paper.x, y: doc.paper.y }, before: JSON.stringify(doc), moved: false };
   } else toolClick(st.cur);
@@ -979,6 +1023,20 @@ window.addEventListener('mouseup', ev => {
 cv.addEventListener('dblclick', () => {
   if (st.tool === 'wire') { finishWire(); return; }
   const e = selEnt();
+  if (st.tool === 'select' && e && e.type === 'wire' && isEditable(e)) {   // 中継点を追加
+    const tol = 8 / view.z;
+    if (vertexHit(e, st.raw, tol) != null) return;
+    let bi = -1, bd = Infinity, bq = null;
+    for (let i = 0; i < e.pts.length - 1; i++) {
+      const r = distToSeg(st.raw, e.pts[i], e.pts[i + 1]);
+      if (r.d < bd) { bd = r.d; bi = i; bq = r.q; }
+    }
+    if (bi >= 0 && bd <= tol) {
+      const q = st.snap && st.snap.type ? { x: st.cur.x, y: st.cur.y } : bq;
+      pushUndo(); e.pts.splice(bi + 1, 0, { x: q.x, y: q.y }); st.vsel = bi + 1; changed();
+    }
+    return;
+  }
   if (st.tool === 'select' && e && e.type === 'text' && isEditable(e)) {
     const t = prompt('文字', e.text);
     if (t != null && t !== e.text) { pushUndo(); e.text = t; changed(); }
@@ -995,15 +1053,31 @@ function selectPress(screen) {
   const tol = 8 / view.z, cur = selEnt();
   if (cur && isEditable(cur)) {
     const vi = vertexHit(cur, st.raw, tol);
-    if (vi != null) { st.drag = { type: 'vertex', id: cur.id, vi, before: JSON.stringify(doc), moved: false }; return; }
+    if (vi != null) { st.vsel = vi; st.drag = { type: 'vertex', id: cur.id, vi, before: JSON.stringify(doc), moved: false }; render(); return; }
   }
   const h = hitTest(st.raw, tol);
   st.sel = h ? h.id : null;
+  st.vsel = null;
   if (h) {
     const s = snapAt(st.raw, { exclude: h.id });
     st.drag = { type: 'move', id: h.id, start: { x: s.x, y: s.y }, orig: clone(h), before: JSON.stringify(doc), moved: false };
   } else startPan(screen);   // 何もない所をドラッグ → 画面移動
   refreshProps(); render();
+}
+function erasePress() {
+  const h = hitTest(st.raw, 8 / view.z);
+  if (!h) return;
+  st.sel = h.id; renderNow();
+  setTimeout(() => {   // 赤く表示してから確認する
+    if (confirm(`この${entName(h)}を削除しますか？`)) {
+      pushUndo(); doc.entities = doc.entities.filter(x => x !== h); changed();
+    }
+    st.sel = null; render();
+  }, 30);
+}
+function entName(e) {
+  if (e.type === 'sym') return (SYM[e.kind] || {}).name || '記号';
+  return { wall: '壁', line: '線', wire: '配線', dim: '寸法', text: '文字' }[e.type] || '図形';
 }
 function markMoved(d) {
   if (d.moved) return;
@@ -1079,7 +1153,7 @@ window.addEventListener('keydown', ev => {
   if (k === 'Home') { fit(); return; }
   if (lk === 'r') { rotateOrFlip('rot'); return; }
   if (lk === 'f') { rotateOrFlip('flip'); return; }
-  const map = { v: 'select', k: 'wall', l: 'line', w: 'wire', d: 'dim', t: 'text', p: 'paper' };
+  const map = { v: 'select', k: 'wall', l: 'line', w: 'wire', d: 'dim', t: 'text', p: 'paper', e: 'erase' };
   if (map[lk]) setTool(map[lk]);
 });
 window.addEventListener('keyup', ev => {
@@ -1181,6 +1255,7 @@ function refreshProps() {
       }
     }
     if (d.labelPos) box.append(row('傍記', labelBox(st.place.label, d.labels, v => { st.place.label = v; render(); })));
+    if (d.wallMark) box.append(row('壁付き', el('input', { type: 'checkbox', checked: st.wallMark, title: '背面を塗って壁付きを表す', onchange: ev => { st.wallMark = ev.target.checked; render(); } })));
     if (d.column) {
       box.append(row('壁厚に合わせる', el('input', { type: 'checkbox', checked: st.colFit, onchange: ev => { st.colFit = ev.target.checked; render(); } })));
       box.append(row('寸法 mm', numBox(st.colSize, v => { st.colSize = v; render(); }, { step: 5, min: 30 })));
@@ -1212,6 +1287,8 @@ function refreshProps() {
       title.textContent = '配線';
       box.append(row('種類', selectBox(WIRE_TYPES, e.wtype, v => set('wtype', v))));
       box.append(row('電線本数', numBox(e.count || 2, v => set('count', Math.max(1, Math.round(v))), { min: 1, max: 9, step: 1 })));
+      box.append(row('角の丸み', numBox(e.r ?? 4, v => set('r', Math.max(0, v)), { min: 0, step: 1, title: '用紙上の半径 mm。0で角ばる' })));
+      box.append(el('div', { class: 'empty' }, '線の上をダブルクリックで中継点を追加、中継点を選んで Delete で削除'));
       break;
     case 'dim': {
       title.textContent = '寸法';
@@ -1231,6 +1308,7 @@ function refreshProps() {
       const d = SYM[e.kind] || { name: e.kind };
       title.textContent = d.name;
       if (d.labelPos) box.append(row('傍記', labelBox(e.label, d.labels, v => set('label', v))));
+      if (d.wallMark) box.append(row('壁付き', el('input', { type: 'checkbox', checked: !!e.wallMark, onchange: ev => set('wallMark', ev.target.checked || undefined) })));
       if (d.column) {
         box.append(row('幅 mm', numBox(e.w, v => { pushUndo(); e.w = v; e.fit = false; changed(); }, { step: 5, min: 30 })));
         box.append(row('奥行 mm', numBox((e.d1 || 0) + (e.d2 || 0), v => { pushUndo(); e.d1 = e.d2 = v / 2; e.fit = false; changed(); }, { step: 5, min: 30 })));
@@ -1256,13 +1334,26 @@ function refreshProps() {
 function refreshLayers() {
   const box = $('#layers');
   box.textContent = '';
-  for (const L of doc.layers) {
+  const n = doc.layers.length;
+  [...doc.layers].reverse().forEach(L => {   // 上ほど手前に描かれる
+    const i = doc.layers.indexOf(L);
+    const move = d => { const j = i + d; if (j < 0 || j >= n) return; pushUndo(); [doc.layers[i], doc.layers[j]] = [doc.layers[j], doc.layers[i]]; refreshLayers(); changed(); };
+    const up = el('button', { type: 'button', title: '手前へ', disabled: i === n - 1, onclick: () => move(1) }, '▲');
+    const down = el('button', { type: 'button', title: '奥へ', disabled: i === 0, onclick: () => move(-1) }, '▼');
     const vis = el('input', { type: 'checkbox', checked: L.visible, title: '表示', onchange: ev => { L.visible = ev.target.checked; changed(); } });
     const col = el('input', { type: 'color', title: 'レイヤーの色' });
     col.value = L.color || '#1a1a1a';
     col.addEventListener('change', () => { pushUndo(); L.color = col.value; changed(); });
     const lock = el('button', { type: 'button', title: 'ロック（編集禁止）', onclick: () => { L.locked = !L.locked; refreshLayers(); changed(); } }, L.locked ? '🔒' : '🔓');
-    box.append(el('div', { class: 'layer' }, vis, col, el('span', { class: 'name' }, L.name), lock));
+    box.append(el('div', { class: 'layer' }, vis, col, el('span', { class: 'name' }, L.name), up, down, lock));
+  });
+  box.append(el('div', { class: 'empty' }, '上にあるレイヤーほど手前に描かれます'));
+  const sel = $('#drawLayer');
+  if (sel) {
+    const v = st.drawLayer;
+    sel.textContent = '';
+    sel.append(el('option', { value: '' }, '自動'), ...doc.layers.map(L => el('option', { value: L.id }, L.name)));
+    sel.value = v;
   }
 }
 function refreshSettings() {
@@ -1446,6 +1537,7 @@ function init() {
   $('#lineStyle').addEventListener('change', ev => { st.lineStyle = ev.target.value; setTool('line'); });
   $('#wireType').addEventListener('change', ev => { st.wireType = ev.target.value; setTool('wire'); });
   $('#drawColor').addEventListener('change', ev => { st.color = ev.target.value; ev.target.style.color = st.color || ''; });
+  $('#drawLayer').addEventListener('change', ev => { st.drawLayer = ev.target.value; });
   $('#wallL').value = st.wallL; $('#wallR').value = st.wallR;
   $('#wallL').addEventListener('change', ev => { st.wallL = Math.max(0, +ev.target.value || 0); setTool('wall'); });
   $('#wallR').addEventListener('change', ev => { st.wallR = Math.max(0, +ev.target.value || 0); setTool('wall'); });

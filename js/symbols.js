@@ -5,12 +5,13 @@
  *         'world' … 実寸(mm)で描く（建具など。w = 開口幅）
  *   wall: true    … 壁線に近づけると壁の向きに合わせて回転・吸着する
  *   wallOff       … 壁に吸着したとき、壁から部屋側へずらす量（用紙mm）
+ *   wallMark      … 「壁付き」の印（背面の塗り）を付けられる記号の半径
  * 記号のローカル座標： -y 側が壁、+y 側が部屋側
  */
 window.SYMBOLS = {
-  outlet:  { name: 'コンセント', cat: 'elec', unit: 'paper', wall: true, wallOff: 1.6, hit: 2,
+  outlet:  { name: 'コンセント', cat: 'elec', unit: 'paper', wall: true, wallOff: 2.1, hit: 2.4, wallMark: 2,
              label: '2', labels: ['', '1', '2', '3', 'E', 'ET', '2E', 'EET', 'WP', '20A', 'EV'],
-             labelPos: { x: 0, y: 3.2 }, labelSize: 2 },
+             labelPos: { x: 0, y: 3.8 }, labelSize: 2 },
   switch:  { name: 'スイッチ', cat: 'elec', unit: 'paper', wall: true, wallOff: 1.2, hit: 1.6,
              label: '', labels: ['', '2', '3', '4', 'H', 'L', 'P', 'D', 'A', 'R'],
              labelPos: { x: 0, y: 2.4 }, labelSize: 2 },
@@ -21,7 +22,7 @@ window.SYMBOLS = {
              label: '', labelPos: { x: 0, y: 3.4 }, labelSize: 2 },
   fan:     { name: '換気扇', cat: 'elec', unit: 'paper', hit: 2.8,
              label: '', labelPos: { x: 0, y: 3.6 }, labelSize: 2 },
-  tv:      { name: 'テレビ端子', cat: 'elec', unit: 'paper', wall: true, wallOff: 2.1, hit: 2.3,
+  tv:      { name: 'テレビ端子', cat: 'elec', unit: 'paper', wall: true, wallOff: 2.1, hit: 2.4, wallMark: 2,
              label: '', labelPos: { x: 0, y: 3.6 }, labelSize: 2 },
   panel:   { name: '分電盤', cat: 'elec', unit: 'paper', wall: true, wallOff: 1.6, hit: 3.4,
              label: '', labelPos: { x: 0, y: 3.4 }, labelSize: 2 },
@@ -55,13 +56,18 @@ window.drawSymbolShape = function (c, e, g) {
   const circle = r => { c.beginPath(); c.arc(0, 0, r, 0, Math.PI * 2); };
   const seg = (x1, y1, x2, y2) => { c.moveTo(x1, y1); c.lineTo(x2, y2); };
   const fillBgStroke = lw => { c.fillStyle = bg; c.fill(); c.lineWidth = Lw(lw); c.stroke(); };
+  // 壁側（-y）を、直径の 1/4 の深さまで塗る
+  const backFill = r => {
+    c.beginPath(); c.arc(0, 0, r, Math.PI * 7 / 6, Math.PI * 11 / 6); c.closePath();
+    c.fillStyle = fg; c.fill();
+  };
   c.strokeStyle = fg;
   c.setLineDash([]);
 
   switch (e.kind) {
     case 'outlet':
-      circle(1.5); fillBgStroke(0.25);
-      c.beginPath(); seg(-0.55, -0.85, -0.55, 0.85); seg(0.55, -0.85, 0.55, 0.85); c.stroke();
+      circle(2); fillBgStroke(0.25);
+      c.beginPath(); seg(-0.7, -1.1, -0.7, 1.1); seg(0.7, -1.1, 0.7, 1.1); c.stroke();
       break;
     case 'switch':
       circle(0.9); c.fillStyle = fg; c.fill();
@@ -71,7 +77,7 @@ window.drawSymbolShape = function (c, e, g) {
       break;
     case 'bracket':
       circle(2); c.fillStyle = bg; c.fill();
-      c.beginPath(); c.arc(0, 0, 2, Math.PI, Math.PI * 2); c.closePath(); c.fillStyle = fg; c.fill();
+      backFill(2);
       circle(2); c.lineWidth = Lw(0.25); c.stroke();
       break;
     case 'fan':
@@ -93,8 +99,13 @@ window.drawSymbolShape = function (c, e, g) {
       break;
     case 'meter':
       c.beginPath(); c.rect(-2.5, -1.75, 5, 3.5); fillBgStroke(0.3);
+      // 文字は逆さまにならないようにする（横向きはそのまま）
+      c.save();
+      if (e.flip) c.scale(-1, 1);
+      { const r = (((e.rot || 0) % 360) + 360) % 360; if (r > 90 + 1e-6 && r < 270 - 1e-6) c.rotate(Math.PI); }
       c.fillStyle = fg; c.textAlign = 'center'; c.textBaseline = 'middle';
       window.fillTextSafe(c, 'Wh', 0, 0.1, 1.7, 'bold');
+      c.restore();
       break;
 
     case 'door': {
@@ -137,5 +148,11 @@ window.drawSymbolShape = function (c, e, g) {
       c.lineWidth = Lw(0.13); c.beginPath(); seg(-w / 2, -d1, w / 2, d2); seg(w / 2, -d1, -w / 2, d2); c.stroke();
       break;
     }
+  }
+  // 壁付きの印
+  const def = window.SYMBOLS[e.kind];
+  if (def && def.wallMark && e.wallMark) {
+    backFill(def.wallMark);
+    circle(def.wallMark); c.lineWidth = Lw(0.25); c.stroke();
   }
 };
